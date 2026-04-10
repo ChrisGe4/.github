@@ -26,8 +26,8 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.app-auth.outputs.token }}
         run: |
-          # Query GitHub API for non-archived public repositories
-          REPOS=$(gh api --paginate /users/ChrisGe4/repos -q '[.[] | select(.archived == false) | .name]')
+          # Query GitHub API for non-archived public repositories and force single-line JSON to prevent GITHUB_OUTPUT truncation
+          REPOS=$(gh api --paginate /users/ChrisGe4/repos -q '[.[] | select(.archived == false) | .name]' | jq -c .)
           echo "repos=${REPOS}" >> $GITHUB_OUTPUT
 
   # Stage 2: Fan out official actions/stale across all discovered repositories
