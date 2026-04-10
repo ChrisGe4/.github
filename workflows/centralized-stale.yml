@@ -1,0 +1,70 @@
+name: "Centralized Organization Stale Bot"
+
+on:
+  schedule:
+    # Run daily at 01:00 UTC
+    - cron: "0 1 * * *"
+  workflow_dispatch:
+
+jobs:
+  # Stage 1: Query the organization for all active repositories
+  fetch-repositories:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.repos }}
+    steps:
+      - name: Setup GitHub App Authentication
+        id: app-auth
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.ORG_STALE_BOT_APP_ID }}
+          private-key: ${{ secrets.ORG_STALE_BOT_PRIVATE_KEY }}
+          owner: "ChrisGe4"
+
+      - name: List active repositories
+        id: set-matrix
+        env:
+          GH_TOKEN: ${{ steps.app-auth.outputs.token }}
+        run: |
+          # Query GitHub API for non-archived public repositories
+          REPOS=$(gh api --paginate /users/ChrisGe4/repos -q '[.[] | select(.archived == false) | .name]')
+          echo "repos=${REPOS}" >> $GITHUB_OUTPUT
+
+  # Stage 2: Fan out official actions/stale across all discovered repositories
+  apply-stale-rules:
+    needs: fetch-repositories
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        repo: ${{ fromJson(needs.fetch-repositories.outputs.matrix) }}
+
+    steps:
+      - name: Setup GitHub App Authentication
+        id: app-auth
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.ORG_STALE_BOT_APP_ID }}
+          private-key: ${{ secrets.ORG_STALE_BOT_PRIVATE_KEY }}
+          owner: "ChrisGe4"
+          repositories: ${{ matrix.repo }}
+
+      - name: Run official stale bot
+        uses: actions/stale@v9
+        # CRITICAL OVERRIDE: Point to the target repo, otherwise it defaults to the runner's self-repo (.github)
+        env:
+          GITHUB_REPOSITORY: "ChrisGe4/${{ matrix.repo }}"
+        with:
+          repo-token: ${{ steps.app-auth.outputs.token }}
+          operations-per-run: 300 # Increase limit for the initial backlog burn-down
+          # Issue configuration (60 days total: 53 inactive + 7 warning)
+          days-before-issue-stale: 53
+          days-before-issue-close: 7
+          stale-issue-message: "This issue has been automatically marked as stale because it has not had recent activity. It will be closed in 7 days if no further activity occurs."
+          stale-issue-label: "stale"
+
+          # PR configuration (30 days total: 23 inactive + 7 warning)
+          days-before-pr-stale: 23
+          days-before-pr-close: 7
+          stale-pr-message: "This pull request has been automatically marked as stale because it has not had recent activity. Please leave a comment to remove this status."
+          stale-pr-label: "stale"
